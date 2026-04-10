@@ -1,164 +1,158 @@
-import React, { useMemo, useState } from 'react';
-import { RotateItemConfig, ValidationError } from '../launcher_config';
-import { CollapsibleSection } from './CollapsibleSection';
-import { LayerConfigPanel } from './LayerConfigPanel';
+import React, { useState, useCallback, useMemo } from 'react';
+import { LauncherConfig, RotateItemConfig } from '../types/config';
+import { defaultConfig } from '../data/initialConfig';
+import { validateConfig } from '../utils/validator';
+import LayerConfigDropdown from './LayerConfigDropdown';
+import PreviewPanel from './PreviewPanel';
 
-interface ConfigEditorProps {
-  configs: RotateItemConfig[];
-  onChange: (configs: RotateItemConfig[]) => void;
-  errors: ValidationError[];
-}
+const ConfigEditor: React.FC = () => {
+  const [config, setConfig] = useState<LauncherConfig>(defaultConfig);
+  const [expandedLayers, setExpandedLayers] = useState<Set<number>>(new Set([0]));
+  const [searchQuery, setSearchQuery] = useState('');
 
-export const ConfigEditor: React.FC<ConfigEditorProps> = ({ configs, onChange, errors }) => {
-  const [searchTerm, setSearchTerm] = useState('');
-  const [filterDisplay, setFilterDisplay] = useState<'all' | 'visible' | 'hidden'>('all');
+  const errors = useMemo(() => validateConfig(config), [config]);
 
-  const filteredConfigs = useMemo(() => {
-    return configs
-      .map((config, index) => ({ config, index }))
-      .filter(({ config }) => {
-        const matchesSearch = config.itemName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                              config.itemCode.toLowerCase().includes(searchTerm.toLowerCase());
-        const matchesFilter = filterDisplay === 'all' ||
-                              (filterDisplay === 'visible' && config.itemDisplay === 'yes') ||
-                              (filterDisplay === 'hidden' && config.itemDisplay === 'no');
-        return matchesSearch && matchesFilter;
-      });
-  }, [configs, searchTerm, filterDisplay]);
+  const handleToggleLayer = useCallback((index: number) => {
+    setExpandedLayers((prev) => {
+      const next = new Set(prev);
+      if (next.has(index)) {
+        next.delete(index);
+      } else {
+        next.add(index);
+      }
+      return next;
+    });
+  }, []);
 
-  const getLayerErrors = (layerIndex: number): ValidationError[] => {
-    return errors.filter(e => e.layerIndex === layerIndex);
-  };
+  const handleUpdateLayer = useCallback(
+    (index: number, updates: Partial<RotateItemConfig>) => {
+      setConfig((prev) => ({
+        ...prev,
+        rotateConfig: prev.rotateConfig.map((layer, i) =>
+          i === index ? { ...layer, ...updates } : layer
+        ),
+      }));
+    },
+    []
+  );
 
-  const updateLayer = (index: number, newConfig: RotateItemConfig) => {
-    const newConfigs = [...configs];
-    newConfigs[index] = newConfig;
-    onChange(newConfigs);
-  };
+  const handleExpandAll = useCallback(() => {
+    setExpandedLayers(new Set(config.rotateConfig.map((_, i) => i)));
+  }, [config.rotateConfig]);
 
-  const bulkToggleDisplay = (value: 'yes' | 'no') => {
-    const newConfigs = configs.map((config, index) =>
-      filteredConfigs.some(f => f.index === index)
-        ? { ...config, itemDisplay: value }
-        : config
+  const handleCollapseAll = useCallback(() => {
+    setExpandedLayers(new Set());
+  }, []);
+
+  const handleEnableAll = useCallback(() => {
+    setConfig((prev) => ({
+      ...prev,
+      rotateConfig: prev.rotateConfig.map((layer) => ({
+        ...layer,
+        itemDisplay: 'yes' as const,
+      })),
+    }));
+  }, []);
+
+  const handleDisableAll = useCallback(() => {
+    setConfig((prev) => ({
+      ...prev,
+      rotateConfig: prev.rotateConfig.map((layer) => ({
+        ...layer,
+        itemDisplay: 'no' as const,
+      })),
+    }));
+  }, []);
+
+  const filteredLayers = useMemo(() => {
+    if (!searchQuery.trim()) {
+      return config.rotateConfig;
+    }
+    const query = searchQuery.toLowerCase();
+    return config.rotateConfig.filter(
+      (layer) =>
+        layer.itemName.toLowerCase().includes(query) ||
+        layer.itemCode.toLowerCase().includes(query) ||
+        layer.itemPath.toLowerCase().includes(query)
     );
-    onChange(newConfigs);
-  };
-
-  const bulkToggleRender = (value: 'yes' | 'no') => {
-    const newConfigs = configs.map((config, index) =>
-      filteredConfigs.some(f => f.index === index)
-        ? { ...config, visualEffects: { ...config.visualEffects, render: value } }
-        : config
-    );
-    onChange(newConfigs);
-  };
+  }, [config.rotateConfig, searchQuery]);
 
   const errorCount = errors.length;
+  const layerWithErrorCount = new Set(errors.map((e) => e.layerIndex)).size;
 
   return (
-    <div className="h-full flex flex-col">
-      <div className="bg-white rounded-xl p-4 mb-4 shadow-sm">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-xl font-bold text-gray-800">
-            ⚙️ 图层配置
-            {errorCount > 0 && (
-              <span className="ml-2 px-2 py-1 bg-red-100 text-red-700 text-sm rounded-full">
-                {errorCount} 个错误
-              </span>
-            )}
-          </h2>
-        </div>
+    <div className="app-container">
+      <div className="config-panel">
+        <h1>旋转时钟配置编辑器</h1>
 
-        <div className="flex gap-3 mb-4">
+        <div className="search-bar">
           <input
             type="text"
-            placeholder="🔍 搜索图层名称或代码..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+            className="search-input"
+            placeholder="搜索图层 (名称、代码、路径)..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
           />
-          <select
-            value={filterDisplay}
-            onChange={(e) => setFilterDisplay(e.target.value as 'all' | 'visible' | 'hidden')}
-            className="px-4 py-2 border border-gray-300 rounded-lg text-sm bg-white"
-          >
-            <option value="all">全部图层</option>
-            <option value="visible">仅显示</option>
-            <option value="hidden">仅隐藏</option>
-          </select>
         </div>
 
-        <div className="flex gap-2 flex-wrap">
-          <span className="text-sm text-gray-600 mr-2 self-center">批量操作:</span>
-          <button
-            onClick={() => bulkToggleDisplay('yes')}
-            className="px-3 py-1.5 bg-green-100 text-green-700 rounded-lg text-sm hover:bg-green-200 transition-colors"
-          >
-            全部显示
+        <div className="bulk-actions">
+          <button className="bulk-btn" onClick={handleExpandAll}>
+            展开全部
           </button>
-          <button
-            onClick={() => bulkToggleDisplay('no')}
-            className="px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg text-sm hover:bg-gray-200 transition-colors"
-          >
-            全部隐藏
+          <button className="bulk-btn" onClick={handleCollapseAll}>
+            折叠全部
           </button>
-          <button
-            onClick={() => bulkToggleRender('yes')}
-            className="px-3 py-1.5 bg-blue-100 text-blue-700 rounded-lg text-sm hover:bg-blue-200 transition-colors"
-          >
-            启用渲染
+          <button className="bulk-btn" onClick={handleEnableAll}>
+            启用全部
           </button>
-          <button
-            onClick={() => bulkToggleRender('no')}
-            className="px-3 py-1.5 bg-orange-100 text-orange-700 rounded-lg text-sm hover:bg-orange-200 transition-colors"
-          >
-            禁用渲染
+          <button className="bulk-btn" onClick={handleDisableAll}>
+            禁用全部
           </button>
-          <span className="text-sm text-gray-500 ml-auto self-center">
-            显示 {filteredConfigs.length} / {configs.length} 个图层
-          </span>
         </div>
-      </div>
 
-      <div className="flex-1 overflow-y-auto pr-2">
-        {filteredConfigs.map(({ config, index }) => {
-          const layerErrors = getLayerErrors(index);
-          const statusIcon = config.itemDisplay === 'yes' ? '👁️' : '👁️‍🗨️';
-          
-          return (
-            <CollapsibleSection
-              key={config.itemCode}
-              title={`${statusIcon} ${config.itemName}`}
-              subtitle={`Layer ${config.itemLayer} • ${config.itemCode}`}
-              hasError={layerErrors.length > 0}
-              defaultOpen={index < 3}
-            >
-              {layerErrors.length > 0 && (
-                <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
-                  <p className="text-red-700 text-sm font-medium mb-2">⚠️ 验证错误:</p>
-                  <ul className="text-red-600 text-xs space-y-1">
-                    {layerErrors.map((error, i) => (
-                      <li key={i}>• {error.field}: {error.message}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              <LayerConfigPanel
-                config={config}
-                onChange={(newConfig) => updateLayer(index, newConfig)}
-                errors={layerErrors}
-              />
-            </CollapsibleSection>
-          );
-        })}
-
-        {filteredConfigs.length === 0 && (
-          <div className="text-center py-12 text-gray-500">
-            没有找到匹配的图层
+        {errorCount > 0 && (
+          <div
+            style={{
+              padding: '10px 15px',
+              background: 'rgba(255, 107, 107, 0.1)',
+              border: '1px solid rgba(255, 107, 107, 0.3)',
+              borderRadius: '6px',
+              marginBottom: '15px',
+              color: '#ff6b6b',
+              fontSize: '0.85rem',
+            }}
+          >
+            发现 {errorCount} 个错误，涉及 {layerWithErrorCount} 个图层
           </div>
         )}
+
+        <div style={{ marginBottom: '10px', color: '#888', fontSize: '0.85rem' }}>
+          显示 {filteredLayers.length} / {config.rotateConfig.length} 个图层
+        </div>
+
+        <div>
+          {filteredLayers.map((layer) => {
+            const originalIndex = config.rotateConfig.findIndex(
+              (l) => l.itemCode === layer.itemCode
+            );
+            return (
+              <LayerConfigDropdown
+                key={layer.itemCode}
+                layer={layer}
+                index={originalIndex}
+                isExpanded={expandedLayers.has(originalIndex)}
+                errors={errors}
+                onToggle={() => handleToggleLayer(originalIndex)}
+                onUpdate={handleUpdateLayer}
+              />
+            );
+          })}
+        </div>
       </div>
+
+      <PreviewPanel config={config} />
     </div>
   );
 };
+
+export default ConfigEditor;
